@@ -63,7 +63,7 @@ int countdown = 0; //countdown timer
 int matchLength = 180; //in seconds
 int timeCount; //counter for one second
 int paused = 0; //pause counter
-bool soundPlayed = false; //tracks whether state sound has been played
+bool publishStateFlag = false; // indicates a request to broadcast the system state
 
 //receiver MAC address
 uint8_t broadcastAddress1[] = {0xA8, 0x42, 0xE3, 0x47, 0x98, 0x30}; //sound node
@@ -99,6 +99,12 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
+}
+
+void UpdateState(uint8_t newState)
+{
+    state = newState;
+    publishStateFlag = true;
 }
 
 //peer info
@@ -199,23 +205,19 @@ void nextISR() { //next button ISR
     switch (state) { //state changes from "next" button
 
       case STATE_IDLE: //change from idle to load-in
-        state = STATE_LOAD_IN;
-        soundPlayed = false; //indicates a state change
+        UpdateState(STATE_LOAD_IN);
         break;
       
       case STATE_LOAD_IN: //change from load-in to ready for battle
-        state = STATE_READY;
-        soundPlayed = false; //indicates a state change
+        UpdateState(STATE_READY);
         break;
 
       case STATE_READY: //change from ready for battle to start countdown
-        state = STATE_COUNTDOWN;
-        soundPlayed = false; //indicates a state change
+        UpdateState(STATE_COUNTDOWN);
         break;
 
       case STATE_KO_CONFIRM: //change from ko confirm to match timer
-        state = STATE_MATCH;
-        soundPlayed = false; //indicates a state change
+        UpdateState(STATE_MATCH);
         break;
     }
   }
@@ -230,13 +232,12 @@ void pauseISR() { //pause button ISR
   if (interrupt_time - last_interrupt_time > 200) 
   {
     if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to pause
-      state = STATE_PAUSE;
-    } else if (state == STATE_LOAD_IN1) { //change from pause to match timer
-      state = STATE_COUNTDOWN;
+      UpdateState(STATE_PAUSE);
+    } else if (state == STATE_LOAD_IN) { //change from pause to match timer
+      UpdateState(STATE_COUNTDOWN);
     }
   }
   last_interrupt_time = interrupt_time;
-  soundPlayed = false; //indicates a state change
   return;
 }
 
@@ -247,13 +248,12 @@ void koISR() { //ko button ISR
   if (interrupt_time - last_interrupt_time > 200) 
     {
     if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to ko confirm
-      state = STATE_KO_CONFIRM;
+      UpdateState(STATE_KO_CONFIRM);
     } else if (state == STATE_KO_CONFIRM) { //change from ko confirm to knock out
-      state = STATE_KO;
+      UpdateState(STATE_KO);
     }
   }
   last_interrupt_time = interrupt_time;
-  soundPlayed = false; //indicates a state change
   return;
 }
 
@@ -264,13 +264,12 @@ void estopISR() { //estop button ISR
   if (interrupt_time - last_interrupt_time > 200) 
     {
     if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to estop
-      state = STATE_E_STOP;
-    } else if (state == STATE_LOAD_IN0) { //change from estop to match timer
-      state = STATE_COUNTDOWN;
+      UpdateState(STATE_E_STOP);
+    } else if (state == STATE_LOAD_IN) { //change from estop to match timer
+      UpdateState(STATE_COUNTDOWN);
     }
   }
   last_interrupt_time = interrupt_time;
-  soundPlayed = false; //indicates a state change
   return;
 }
 
@@ -281,13 +280,12 @@ void resetISR() { //reset button ISR
   if (interrupt_time - last_interrupt_time > 200) 
   {
     if (state == STATE_END) { //change from match end to idle
-      state = STATE_IDLE;
+      UpdateState(STATE_IDLE);
     } else if (state == STATE_KO) { //change from knock out to idle
-      state = STATE_IDLE;
+      UpdateState(STATE_IDLE);
     }
   }
   last_interrupt_time = interrupt_time;
-  soundPlayed = false; //indicates a state change
   return;
 }
  
@@ -346,8 +344,7 @@ void loop() {
       if (countdown == 209) { //three seconds
         //GO!!!
         countdown = 0;
-        state = STATE_MATCH;
-        soundPlayed = false; //indicates a state change
+        UpdateState(STATE_MATCH);
       }
       break;
 
@@ -381,8 +378,7 @@ void loop() {
       }
       
       if (timer <= 60) {
-        state = STATE_1_MIN; //automatically progress state machine
-        soundPlayed = false; //indicates a state change
+        UpdateState(STATE_1_MIN);
       }
       break;
 
@@ -415,8 +411,7 @@ void loop() {
       }
       
       if (timer <= 10) {
-        state = STATE_10_SEC; //automatically progress state machine
-        soundPlayed = false; //indicates a state change
+        UpdateState(STATE_10_SEC);
       }
       break;
     
@@ -449,8 +444,7 @@ void loop() {
       }
       
       if (timer == 0) {
-        state = STATE_END; //automatically progress state machine
-        soundPlayed = false; //indicates a state change
+        UpdateState(STATE_END);
       }
       break;
 
@@ -487,8 +481,7 @@ void loop() {
       }
 
       if (timer == 0) {
-        state = STATE_END; //automatically progress state machine
-        soundPlayed = false; //indicates a state change
+        UpdateState(STATE_END);
       }
       
       break;
@@ -568,7 +561,7 @@ void loop() {
   }
 
   //broadcast sound command if not yet sent after state change
-  if (soundPlayed == false) {
+  if (publishStateFlag) {
 
     //readout new state
     Serial.println(state);
@@ -617,7 +610,7 @@ void loop() {
     }
     #endif
 
-    soundPlayed = true; //set soundPlayed to true after broadcast
+    publishStateFlag = false; //set publishStateFlag to false after broadcast
   }
 }
 
