@@ -16,6 +16,20 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
+// Improve State Readability
+#define STATE_IDLE          0
+#define STATE_LOAD_IN       1
+#define STATE_READY         2
+#define STATE_COUNTDOWN     3
+#define STATE_MATCH         4
+#define STATE_1_MIN         5
+#define STATE_10_SEC        6
+#define STATE_END           7
+#define STATE_KO_CONFIRM    8
+#define STATE_KO            9
+#define STATE_E_STOP        10
+#define STATE_PAUSE         11
+
 //define peers
 #define PEER_ONE //sound node
 #define PEER_TWO //timer node
@@ -41,7 +55,7 @@ int lastButtonState = LOW; //previous input reading
 int buttonState; //current input reading
 
 //initialize state counter, timer, and match length
-volatile int state = 0;
+volatile int state = STATE_IDLE;
 int timer = 0;
 int minute = 0; //minute counter for timer display
 int second = 0; //second counter for timer display
@@ -184,23 +198,23 @@ void nextISR() { //next button ISR
   {
     switch (state) { //state changes from "next" button
 
-      case 0: //change from idle to load-in
-        state = 1;
+      case STATE_IDLE: //change from idle to load-in
+        state = STATE_LOAD_IN;
         soundPlayed = false; //indicates a state change
         break;
       
-      case 1: //change from load-in to ready for battle
-        state = 2;
+      case STATE_LOAD_IN: //change from load-in to ready for battle
+        state = STATE_READY;
         soundPlayed = false; //indicates a state change
         break;
 
-      case 2: //change from ready for battle to start countdown
-        state = 3;
+      case STATE_READY: //change from ready for battle to start countdown
+        state = STATE_COUNTDOWN;
         soundPlayed = false; //indicates a state change
         break;
 
-      case 8: //change from ko confirm to match timer
-        state = 4;
+      case STATE_KO_CONFIRM: //change from ko confirm to match timer
+        state = STATE_MATCH;
         soundPlayed = false; //indicates a state change
         break;
     }
@@ -215,10 +229,10 @@ void pauseISR() { //pause button ISR
   // If interrupts come faster than 200ms, assume it's a bounce and ignore
   if (interrupt_time - last_interrupt_time > 200) 
   {
-    if (state == 4 || state == 5 || state == 6) { //change from match timer to pause
-      state = 11;
-    } else if (state == 11) { //change from pause to match timer
-      state = 3;
+    if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to pause
+      state = STATE_PAUSE;
+    } else if (state == STATE_LOAD_IN1) { //change from pause to match timer
+      state = STATE_COUNTDOWN;
     }
   }
   last_interrupt_time = interrupt_time;
@@ -232,10 +246,10 @@ void koISR() { //ko button ISR
   // If interrupts come faster than 200ms, assume it's a bounce and ignore
   if (interrupt_time - last_interrupt_time > 200) 
     {
-    if (state == 4 || state == 5 || state == 6) { //change from match timer to ko confirm
-      state = 8;
-    } else if (state == 8) { //change from ko confirm to knock out
-      state = 9;
+    if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to ko confirm
+      state = STATE_KO_CONFIRM;
+    } else if (state == STATE_KO_CONFIRM) { //change from ko confirm to knock out
+      state = STATE_KO;
     }
   }
   last_interrupt_time = interrupt_time;
@@ -249,10 +263,10 @@ void estopISR() { //estop button ISR
   // If interrupts come faster than 200ms, assume it's a bounce and ignore
   if (interrupt_time - last_interrupt_time > 200) 
     {
-    if (state == 4 || state == 5 || state == 6) { //change from match timer to estop
-      state = 10;
-    } else if (state == 10) { //change from estop to match timer
-      state = 3;
+    if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to estop
+      state = STATE_E_STOP;
+    } else if (state == STATE_LOAD_IN0) { //change from estop to match timer
+      state = STATE_COUNTDOWN;
     }
   }
   last_interrupt_time = interrupt_time;
@@ -266,10 +280,10 @@ void resetISR() { //reset button ISR
   // If interrupts come faster than 200ms, assume it's a bounce and ignore
   if (interrupt_time - last_interrupt_time > 200) 
   {
-    if (state == 7) { //change from match end to idle
-      state = 0;
-    } else if (state == 9) { //change from knock out to idle
-      state = 0;
+    if (state == STATE_END) { //change from match end to idle
+      state = STATE_IDLE;
+    } else if (state == STATE_KO) { //change from knock out to idle
+      state = STATE_IDLE;
     }
   }
   last_interrupt_time = interrupt_time;
@@ -281,7 +295,7 @@ void loop() {
   //match state machine
   switch(state) {
 
-    case 0: //idle state: steady white leds
+    case STATE_IDLE: //idle state: steady white leds
       //reset timer
       timer = matchLength;
 
@@ -292,7 +306,7 @@ void loop() {
       display.display();
       break;
 
-    case 1: //load-in state: slow yellow pulse, yellow load-in text on timer
+    case STATE_LOAD_IN;: //load-in state: slow yellow pulse, yellow load-in text on timer
       //state actions (display "Load-In" text)
       display.clearDisplay();
       display.setCursor(10, 10);
@@ -300,7 +314,7 @@ void loop() {
       display.display();
       break;
 
-    case 2: //ready for battle state: steady green light, ready for battle text on timer
+    case STATE_READY: //ready for battle state: steady green light, ready for battle text on timer
       //state actions (display "Ready for Battle" text)
       display.clearDisplay();
       display.setCursor(10, 0);
@@ -308,7 +322,7 @@ void loop() {
       display.display();
       break;
 
-    case 3: //countdown state: 1hz white pulse, 3-2-1 countdown text on timer
+    case STATE_COUNTDOWN: //countdown state: 1hz white pulse, 3-2-1 countdown text on timer
       //state actions (3 second countdown on display)
       if (countdown < 70) {
         display.clearDisplay();
@@ -332,12 +346,12 @@ void loop() {
       if (countdown == 209) { //three seconds
         //GO!!!
         countdown = 0;
-        state = 4;
+        state = STATE_MATCH;
         soundPlayed = false; //indicates a state change
       }
       break;
 
-    case 4: //match state: steady white for t>1min, steady yellow for 1min>t>10sec, 1hz red pulse for t<10sec
+    case STATE_MATCH: //match state: steady white for t>1min, steady yellow for 1min>t>10sec, 1hz red pulse for t<10sec
             //timer counting from 3 minutes
       //state actions (maintain a 3 minute timer on the controller)
       minute = timer / 60;
@@ -367,12 +381,12 @@ void loop() {
       }
       
       if (timer <= 60) {
-        state = 5; //automatically progress state machine
+        state = STATE_1_MIN; //automatically progress state machine
         soundPlayed = false; //indicates a state change
       }
       break;
 
-    case 5: //one minute left state
+    case STATE_1_MIN: //one minute left state
       //state actions (maintain a 3 minute timer on the controller)
       minute = timer / 60;
       second = timer - ( minute * 60 );
@@ -401,12 +415,12 @@ void loop() {
       }
       
       if (timer <= 10) {
-        state = 6; //automatically progress state machine
+        state = STATE_10_SEC; //automatically progress state machine
         soundPlayed = false; //indicates a state change
       }
       break;
     
-    case 6: //ten seconds left state
+    case STATE_10_SEC: //ten seconds left state
       //state actions (maintain a 3 minute timer on the controller)
       minute = timer / 60;
       second = timer - ( minute * 60 );
@@ -435,12 +449,12 @@ void loop() {
       }
       
       if (timer == 0) {
-        state = 7; //automatically progress state machine
+        state = STATE_END; //automatically progress state machine
         soundPlayed = false; //indicates a state change
       }
       break;
 
-    case 7: //match end state: steady red light, match end text on timer
+    case STATE_END: //match end state: steady red light, match end text on timer
       //show solid red
       display.clearDisplay();
       display.setCursor(0, 10);
@@ -448,7 +462,7 @@ void loop() {
       display.display();
       break;
 
-    case 8: //ko confirm state
+    case STATE_KO_CONFIRM: //ko confirm state
       //ko question displayed
       if (paused < 40) {
         display.clearDisplay();
@@ -473,13 +487,13 @@ void loop() {
       }
 
       if (timer == 0) {
-        state = 7; //automatically progress state machine
+        state = STATE_END; //automatically progress state machine
         soundPlayed = false; //indicates a state change
       }
       
       break;
     
-    case 9: //ko+tapout state: 3 red pulses at 2hz, ko on timer
+    case STATE_KO: //ko+tapout state: 3 red pulses at 2hz, ko on timer
       //state actions (blinking "Knock Out" three times)
       for (int i = 0; i < 59; i++) {
         if (paused < 10) {
@@ -498,7 +512,7 @@ void loop() {
         
       }
       //wait until reset button is pressed
-      while(state == 9) {
+      while(state == STATE_KO) {
         //display "Knock Out"
         display.clearDisplay();
         display.setCursor(10, 10);
@@ -507,7 +521,7 @@ void loop() {
       }
       break;
 
-    case 10: //estop state
+    case STATE_E_STOP: //estop state
       if (paused < 40) {
         display.clearDisplay();
         display.setCursor(10, 10);
@@ -523,7 +537,7 @@ void loop() {
       }
       break;
     
-    case 11: //pause state
+    case STATE_PAUSE: //pause state
       if (paused < 40) {
         display.clearDisplay();
         display.setCursor(10, 10);
