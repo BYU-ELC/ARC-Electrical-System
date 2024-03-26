@@ -31,9 +31,9 @@
 #define STATE_PAUSE         11
 
 //define peers
-#define PEER_ONE //sound node
-#define PEER_TWO //timer node
-#define PEER_THREE //light node
+#define SOUND_NODE //sound node
+#define TIMER_NODE //timer node
+#define LIGHT_NODE //light node
 
 //setup OLED screen
 #define SCREEN_WIDTH 128 //OLED display width
@@ -67,10 +67,10 @@ bool publishStateFlag = false; // indicates a request to broadcast the system st
 
 //receiver MAC address
 uint8_t broadcastAddress1[] = {0xA8, 0x42, 0xE3, 0x47, 0x98, 0x30}; //sound node
-#ifdef PEER_TWO
+#ifdef TIMER_NODE
 uint8_t broadcastAddress2[] = {0x48, 0x27, 0xE2, 0x3D, 0x0E, 0x28}; //timer node
 #endif
-#ifdef PEER_THREE
+#ifdef LIGHT_NODE
 uint8_t broadcastAddress3[] = {0xA8, 0x42, 0xE3, 0x47, 0x95, 0x30}; //light node
 #endif
 
@@ -101,8 +101,8 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
 }
 
-void UpdateState(uint8_t newState)
-{
+// Set the publish flag on every state change
+void UpdateState(uint8_t newState){
     state = newState;
     publishStateFlag = true;
 }
@@ -158,7 +158,7 @@ void setup() {
   }
 
   // Add second peer
-  #ifdef PEER_TWO
+  #ifdef TIMER_NODE
   memcpy(peerInfo.peer_addr, broadcastAddress2, 6);
   if (esp_now_add_peer(&peerInfo) != ESP_OK){
     Serial.println("Failed to add peer");
@@ -167,7 +167,7 @@ void setup() {
   #endif
 
   // Add third peer
-  #ifdef PEER_THREE
+  #ifdef LIGHT_NODE
   memcpy(peerInfo.peer_addr, broadcastAddress3, 6);
   if (esp_now_add_peer(&peerInfo) != ESP_OK){
     Serial.println("Failed to add peer");
@@ -582,7 +582,7 @@ void loop() {
       Serial.println("Error sending the data");
     }
     
-    #ifdef PEER_TWO
+    #ifdef TIMER_NODE
     esp_err_t result2 = esp_now_send(
       broadcastAddress2, 
       (uint8_t *) &outGoing,
@@ -596,7 +596,7 @@ void loop() {
     }
     #endif
 
-    #ifdef PEER_THREE
+    #ifdef LIGHT_NODE
     esp_err_t result3 = esp_now_send(
       broadcastAddress3, 
       (uint8_t *) &outGoing,
