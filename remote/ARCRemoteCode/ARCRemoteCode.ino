@@ -233,7 +233,7 @@ void pauseISR() { //pause button ISR
   {
     if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to pause
       UpdateState(STATE_PAUSE);
-    } else if (state == STATE_LOAD_IN) { //change from pause to match timer
+    } else if (state == STATE_PAUSE) { //change from pause to match timer
       UpdateState(STATE_COUNTDOWN);
     }
   }
@@ -263,9 +263,9 @@ void estopISR() { //estop button ISR
   // If interrupts come faster than 200ms, assume it's a bounce and ignore
   if (interrupt_time - last_interrupt_time > 200) 
     {
-    if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to estop
+    if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC || state == STATE_10_SEC) { //change from match timer to estop
       UpdateState(STATE_E_STOP);
-    } else if (state == STATE_LOAD_IN) { //change from estop to match timer
+    } else if (state == STATE_E_STOP) { //change from estop to match timer
       UpdateState(STATE_COUNTDOWN);
     }
   }
@@ -282,6 +282,8 @@ void resetISR() { //reset button ISR
     if (state == STATE_END) { //change from match end to idle
       UpdateState(STATE_IDLE);
     } else if (state == STATE_KO) { //change from knock out to idle
+      UpdateState(STATE_IDLE);
+    } else if (state == STATE_E_STOP) { //change from knock out to idle
       UpdateState(STATE_IDLE);
     }
   }
@@ -304,7 +306,7 @@ void loop() {
       display.display();
       break;
 
-    case STATE_LOAD_IN;: //load-in state: slow yellow pulse, yellow load-in text on timer
+    case STATE_LOAD_IN: //load-in state: slow yellow pulse, yellow load-in text on timer
       //state actions (display "Load-In" text)
       display.clearDisplay();
       display.setCursor(10, 10);
