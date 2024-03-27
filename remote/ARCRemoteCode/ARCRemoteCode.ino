@@ -15,6 +15,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Button.h>
 
 // Improve State Readability
 #define STATE_IDLE          0
@@ -49,10 +50,11 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define reset 19
 
 //debounce setup
-unsigned long lastDebounceTime = 0; //last time the button was toggled
-unsigned long debounceDelay = 50; //debounce time
-int lastButtonState = LOW; //previous input reading
-int buttonState; //current input reading
+Button nextButton(next);
+Button pauseButton(pause);
+Button koButton(ko);
+Button estopButton(estop);
+Button resetButton(reset);
 
 //initialize state counter, timer, and match length
 volatile int state = STATE_IDLE;
@@ -114,23 +116,12 @@ void setup() {
   // Init Serial Monitor
   Serial.begin(115200);
 
-
   //---------------Button Setup----------------
-
-  //set pinModes for inputs
-  pinMode(next, INPUT);
-  pinMode(pause, INPUT);
-  pinMode(ko, INPUT);
-  pinMode(estop, INPUT);
-  pinMode(reset, INPUT);
- 
-  //attach ISRs
-  attachInterrupt(digitalPinToInterrupt(next), nextISR, RISING);
-  attachInterrupt(digitalPinToInterrupt(pause), pauseISR, RISING);
-  attachInterrupt(digitalPinToInterrupt(ko), koISR, RISING);
-  attachInterrupt(digitalPinToInterrupt(estop), estopISR, RISING);
-  attachInterrupt(digitalPinToInterrupt(reset), resetISR, RISING);
-
+  nextButton.begin();
+  pauseButton.begin();
+  koButton.begin();
+  estopButton.begin();
+  resetButton.begin();
 
   //---------------ESP-NOW Setup----------------
 
@@ -196,102 +187,73 @@ void setup() {
   display.display();
 }
 
-void nextISR() { //next button ISR
-  static unsigned long last_interrupt_time = 0;
-  unsigned long interrupt_time = millis();
-  // If interrupts come faster than 200ms, assume it's a bounce and ignore
-  if (interrupt_time - last_interrupt_time > 200) 
-  {
-    switch (state) { //state changes from "next" button
+void nextFunction() { //next button
+  switch (state) { //state changes from "next" button
 
-      case STATE_IDLE: //change from idle to load-in
-        UpdateState(STATE_LOAD_IN);
-        break;
-      
-      case STATE_LOAD_IN: //change from load-in to ready for battle
-        UpdateState(STATE_READY);
-        break;
+    case STATE_IDLE: //change from idle to load-in
+      UpdateState(STATE_LOAD_IN);
+      break;
+    
+    case STATE_LOAD_IN: //change from load-in to ready for battle
+      UpdateState(STATE_READY);
+      break;
 
-      case STATE_READY: //change from ready for battle to start countdown
-        UpdateState(STATE_COUNTDOWN);
-        break;
-
-      case STATE_KO_CONFIRM: //change from ko confirm to match timer
-        UpdateState(STATE_MATCH);
-        break;
-    }
-  }
-  last_interrupt_time = interrupt_time;
-  return;
-}
-
-void pauseISR() { //pause button ISR
-  static unsigned long last_interrupt_time = 0;
-  unsigned long interrupt_time = millis();
-  // If interrupts come faster than 200ms, assume it's a bounce and ignore
-  if (interrupt_time - last_interrupt_time > 200) 
-  {
-    if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to pause
-      UpdateState(STATE_PAUSE);
-    } else if (state == STATE_PAUSE) { //change from pause to match timer
+    case STATE_READY: //change from ready for battle to start countdown
       UpdateState(STATE_COUNTDOWN);
-    }
+      break;
+
+    case STATE_KO_CONFIRM: //change from ko confirm to match timer
+      UpdateState(STATE_MATCH);
+      break;
   }
-  last_interrupt_time = interrupt_time;
+}
+
+void pauseFunction() { //pause button
+  if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to pause
+    UpdateState(STATE_PAUSE);
+  } else if (state == STATE_PAUSE) { //change from pause to match timer
+    UpdateState(STATE_COUNTDOWN);
+  }
   return;
 }
 
-void koISR() { //ko button ISR
-  static unsigned long last_interrupt_time = 0;
-  unsigned long interrupt_time = millis();
-  // If interrupts come faster than 200ms, assume it's a bounce and ignore
-  if (interrupt_time - last_interrupt_time > 200) 
-    {
-    if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to ko confirm
-      UpdateState(STATE_KO_CONFIRM);
-    } else if (state == STATE_KO_CONFIRM) { //change from ko confirm to knock out
-      UpdateState(STATE_KO);
-    }
+void koFunction() { //ko button
+  if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to ko confirm
+    UpdateState(STATE_KO_CONFIRM);
+  } else if (state == STATE_KO_CONFIRM) { //change from ko confirm to knock out
+    UpdateState(STATE_KO);
   }
-  last_interrupt_time = interrupt_time;
   return;
 }
 
-void estopISR() { //estop button ISR
-  static unsigned long last_interrupt_time = 0;
-  unsigned long interrupt_time = millis();
-  // If interrupts come faster than 200ms, assume it's a bounce and ignore
-  if (interrupt_time - last_interrupt_time > 200) 
-    {
-    if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC || state == STATE_10_SEC) { //change from match timer to estop
-      UpdateState(STATE_E_STOP);
-    } else if (state == STATE_E_STOP) { //change from estop to match timer
-      UpdateState(STATE_COUNTDOWN);
-    }
+void estopFunction() { //estop button
+  if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC || state == STATE_10_SEC) { //change from match timer to estop
+    UpdateState(STATE_E_STOP);
+  } else if (state == STATE_E_STOP) { //change from estop to match timer
+    UpdateState(STATE_COUNTDOWN);
   }
-  last_interrupt_time = interrupt_time;
   return;
 }
 
-void resetISR() { //reset button ISR
-  static unsigned long last_interrupt_time = 0;
-  unsigned long interrupt_time = millis();
-  // If interrupts come faster than 200ms, assume it's a bounce and ignore
-  if (interrupt_time - last_interrupt_time > 200) 
-  {
-    if (state == STATE_END) { //change from match end to idle
-      UpdateState(STATE_IDLE);
-    } else if (state == STATE_KO) { //change from knock out to idle
-      UpdateState(STATE_IDLE);
-    } else if (state == STATE_E_STOP) { //change from knock out to idle
-      UpdateState(STATE_IDLE);
-    }
+void resetFunction() { //reset button
+  if (state == STATE_END) { //change from match end to idle
+    UpdateState(STATE_IDLE);
+  } else if (state == STATE_KO) { //change from knock out to idle
+    UpdateState(STATE_IDLE);
+  } else if (state == STATE_E_STOP) { //change from knock out to idle
+    UpdateState(STATE_IDLE);
   }
-  last_interrupt_time = interrupt_time;
-  return;
 }
  
 void loop() {
+
+  // Button Routines (use released() for faster response)
+  if (nextButton.released()) nextFunction();
+  if (pauseButton.released()) pauseFunction();
+  if (koButton.released()) koFunction();
+  if (estopButton.released()) estopFunction();
+  if (resetButton.released()) resetFunction();
+  
   //match state machine
   switch(state) {
 
