@@ -33,9 +33,13 @@ struct_message myData;
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   Serial.println("Received data");
   memcpy(&myData, incomingData, sizeof(myData));
-  state = myData.systemState;
-  Serial.println(state);
-  newData = true;
+
+  // Don't bother playing a sound if the state hasn't changed
+  if (state != myData.systemState) {
+    state = myData.systemState;
+    Serial.println(state);
+    newData = true;
+  }
 }
  
 void setup() {
@@ -72,7 +76,7 @@ void setup() {
  
 void loop() {
 
-  if (newData == true) {
+  if (newData) {
     //sound node state machine
     switch(state) {
 
@@ -165,6 +169,8 @@ void loop() {
 
         break;
     }
+
+    // Consume the flag
     newData = false;
   }
   delay(100);
