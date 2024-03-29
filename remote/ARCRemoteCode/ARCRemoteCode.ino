@@ -58,14 +58,12 @@ Button resetButton(reset);
 
 //initialize state counter, timer, and match length
 volatile int state = STATE_IDLE;
-int timer = 0;
-int minute = 0; //minute counter for timer display
-int second = 0; //second counter for timer display
-int countdown = 0; //countdown timer
 int matchLength = 180; //in seconds
-int timeCount; //counter for one second
-int paused = 0; //pause counter
 bool publishStateFlag = false; // indicates a request to broadcast the system state
+
+// Timing
+long currentTime, prevTime, stateTime;
+long countdown;
 
 //receiver MAC address
 uint8_t broadcastAddress1[] = {0xA8, 0x42, 0xE3, 0x47, 0x98, 0x30}; //sound node
@@ -80,7 +78,7 @@ uint8_t broadcastAddress3[] = {0xA8, 0x42, 0xE3, 0x47, 0x95, 0x30}; //light node
 // Must match the receiver structure
 typedef struct struct_message {
   int systemState; //broadcast the system state
-  int systemTime; //timer for the system
+  long systemTime; //timer for the system
 } struct_message;
 
 // Create struct_messages for incoming and outgoing data
@@ -105,8 +103,15 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
 
 // Set the publish flag on every state change
 void UpdateState(uint8_t newState){
+    Serial.println("Updating to state " + String(newState));
     state = newState;
     publishStateFlag = true;
+    stateTime = currentTime; // Record State Change Time
+
+    // Restart the countdown
+    if (state == STATE_IDLE) {
+      countdown = matchLength * 1000;
+    }
 }
 
 //peer info
@@ -185,6 +190,13 @@ void setup() {
   // Display static text
   display.println("Loading...");
   display.display();
+
+  currentTime = millis();
+  prevTime = currentTime;
+  stateTime = currentTime;
+
+  // Init Match time
+  countdown = matchLength * 1000;
 }
 
 void nextFunction() { //next button
@@ -218,9 +230,11 @@ void pauseFunction() { //pause button
 }
 
 void koFunction() { //ko button
+  Serial.println("KO Pressed, in State " + state); 
   if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to ko confirm
     UpdateState(STATE_KO_CONFIRM);
   } else if (state == STATE_KO_CONFIRM) { //change from ko confirm to knock out
+    Serial.println("ko confirm trigger");
     UpdateState(STATE_KO);
   }
   return;
@@ -244,6 +258,27 @@ void resetFunction() { //reset button
     UpdateState(STATE_IDLE);
   }
 }
+
+void displayCountdown() {
+  int minute = countdown / 60000;
+  int second = (countdown / 1000) % 60;
+
+  display.clearDisplay();
+  display.setCursor(10, 10);
+  display.println(minute);
+  display.setCursor(20, 10);
+  display.println(":");
+  if (second < 10) {
+    display.setCursor(30, 10);
+    display.println(0);
+    display.setCursor(42, 10);
+    display.println(second);
+  } else {
+    display.setCursor(30, 10);
+    display.println(second);
+  }
+  display.display();
+}
  
 void loop() {
 
@@ -253,14 +288,15 @@ void loop() {
   if (koButton.released()) koFunction();
   if (estopButton.released()) estopFunction();
   if (resetButton.released()) resetFunction();
+
+  // Update current_time
+  currentTime = millis();
+  long timeSinceStateChange = currentTime - stateTime;
   
   //match state machine
   switch(state) {
 
     case STATE_IDLE: //idle state: steady white leds
-      //reset timer
-      timer = matchLength;
-
       //state actions (display "Idle" text)
       display.clearDisplay();
       display.setCursor(10, 10);
@@ -286,128 +322,56 @@ void loop() {
 
     case STATE_COUNTDOWN: //countdown state: 1hz white pulse, 3-2-1 countdown text on timer
       //state actions (3 second countdown on display)
-      if (countdown < 70) {
+      
+      if (timeSinceStateChange < 1000) {
         display.clearDisplay();
         display.setCursor(10, 10);
         display.println("3...");
         display.display();
-      } else if (70 < countdown && countdown < 140) {
+      } else if (timeSinceStateChange < 2000) {
         display.clearDisplay();
         display.setCursor(10, 10);
         display.println("2...");
         display.display();
-      } else if (140 < countdown) {
+      } else if (timeSinceStateChange < 3000) {
         display.clearDisplay();
         display.setCursor(10, 10);
         display.println("1...");
         display.display();
-      }
-      countdown++;
-      
-      //automatically progress state machine
-      if (countdown == 209) { //three seconds
+      } else { //three seconds
         //GO!!!
-        countdown = 0;
         UpdateState(STATE_MATCH);
       }
       break;
 
     case STATE_MATCH: //match state: steady white for t>1min, steady yellow for 1min>t>10sec, 1hz red pulse for t<10sec
-            //timer counting from 3 minutes
+      //timer counting from 3 minutes
       //state actions (maintain a 3 minute timer on the controller)
-      minute = timer / 60;
-      second = timer - ( minute * 60 );
-
-      display.clearDisplay();
-      display.setCursor(10, 10);
-      display.println(minute);
-      display.setCursor(20, 10);
-      display.println(":");
-      if (second < 10) {
-        display.setCursor(30, 10);
-        display.println(0);
-        display.setCursor(42, 10);
-        display.println(second);
-      } else {
-        display.setCursor(30, 10);
-        display.println(second);
-      }
-      display.display();
-
-      timeCount += 1;
-
-      if (timeCount == 77) { //77 is just under 1 second slow for 3 minutes
-        timeCount = 0;
-        timer -= 1;
-      }
+      countdown -= currentTime - prevTime;
+      displayCountdown();
       
-      if (timer <= 60) {
+      if (countdown <= 60000) {
         UpdateState(STATE_1_MIN);
       }
+      
       break;
 
     case STATE_1_MIN: //one minute left state
       //state actions (maintain a 3 minute timer on the controller)
-      minute = timer / 60;
-      second = timer - ( minute * 60 );
-
-      display.clearDisplay();
-      display.setCursor(10, 10);
-      display.println(minute);
-      display.setCursor(20, 10);
-      display.println(":");
-      if (second < 10) {
-        display.setCursor(30, 10);
-        display.println(0);
-        display.setCursor(42, 10);
-        display.println(second);
-      } else {
-        display.setCursor(30, 10);
-        display.println(second);
-      }
-      display.display();
-
-      timeCount += 1;
-
-      if (timeCount == 79) { //79 is just under 1 second fast for 3 minutes
-        timeCount = 0;
-        timer -= 1;
-      }
+      countdown -= currentTime - prevTime;
+      displayCountdown();
       
-      if (timer <= 10) {
+      if (countdown <= 10000) {
         UpdateState(STATE_10_SEC);
       }
       break;
     
     case STATE_10_SEC: //ten seconds left state
       //state actions (maintain a 3 minute timer on the controller)
-      minute = timer / 60;
-      second = timer - ( minute * 60 );
-
-      display.clearDisplay();
-      display.setCursor(10, 10);
-      display.println(minute);
-      display.setCursor(20, 10);
-      display.println(":");
-      if (second < 10) {
-        display.setCursor(30, 10);
-        display.println(0);
-        display.setCursor(42, 10);
-        display.println(second);
-      } else {
-        display.setCursor(30, 10);
-        display.println(second);
-      }
-      display.display();
-
-      timeCount += 1;
-
-      if (timeCount == 79) { //79 is just under 1 second fast for 3 minutes
-        timeCount = 0;
-        timer -= 1;
-      }
+      countdown -= currentTime - prevTime;
+      displayCountdown();
       
-      if (timer == 0) {
+      if (countdown <= 0) {
         UpdateState(STATE_END);
       }
       break;
@@ -422,29 +386,19 @@ void loop() {
 
     case STATE_KO_CONFIRM: //ko confirm state
       //ko question displayed
-      if (paused < 40) {
+      countdown -= currentTime - prevTime;
+      
+      if (timeSinceStateChange % 1000 < 500) {
         display.clearDisplay();
         display.setCursor(10, 10);
         display.println("KO?");
         display.display();
-        paused++;
-      } else if (paused < 80) {
+      } else {
         display.clearDisplay();
         display.display();
-        paused++;
-      } else {
-        paused = 0;
-      }
-      
-      //continue timer while awaiting confirmation
-      timeCount += 1;
-
-      if (timeCount == 79) { //79 is just under 1 second fast for 3 minutes
-        timeCount = 0;
-        timer -= 1;
       }
 
-      if (timer == 0) {
+      if (countdown <= 0) {
         UpdateState(STATE_END);
       }
       
@@ -452,74 +406,50 @@ void loop() {
     
     case STATE_KO: //ko+tapout state: 3 red pulses at 2hz, ko on timer
       //state actions (blinking "Knock Out" three times)
-      for (int i = 0; i < 59; i++) {
-        if (paused < 10) {
+      
+      if (timeSinceStateChange < 3000)
+      {
+        if (timeSinceStateChange % 500 < 250) {
           display.clearDisplay();
           display.setCursor(10, 10);
           display.println("Knock Out");
           display.display();
-          paused++;
-        } else if (paused < 20) {
+        } else {
           display.clearDisplay();
           display.display();
-          paused++;
-        } else {
-          paused = 0;
         }
-        
       }
-      //wait until reset button is pressed
-      while(state == STATE_KO) {
-        //display "Knock Out"
+      else
+      {
+        //wait until reset button is pressed
         display.clearDisplay();
         display.setCursor(10, 10);
         display.println("Knock Out");
         display.display();
       }
+      // else do nothing
       break;
 
     case STATE_E_STOP: //estop state
-      if (paused < 40) {
+      if (timeSinceStateChange % 1000 < 500) {
         display.clearDisplay();
         display.setCursor(10, 10);
         display.println("E-STOP");
         display.display();
-        paused++;
-      } else if (paused < 80) {
+      } else {
         display.clearDisplay();
         display.display();
-        paused++;
-      } else {
-        paused = 0;
       }
       break;
     
     case STATE_PAUSE: //pause state
-      if (paused < 40) {
+      if (timeSinceStateChange % 1000 < 500) {
         display.clearDisplay();
         display.setCursor(10, 10);
         display.println("Paused");
         display.display();
-        paused++;
-      } else if (paused < 80) {
-        display.clearDisplay();
-        display.setCursor(10, 10);
-        display.println(minute);
-        display.setCursor(20, 10);
-        display.println(":");
-        if (second < 10) {
-          display.setCursor(30, 10);
-          display.println(0);
-          display.setCursor(42, 10);
-          display.println(second);
-        } else {
-          display.setCursor(30, 10);
-          display.println(second);
-        }
-        display.display();
-        paused++;
       } else {
-        paused = 0;
+        displayCountdown();
       }
       break;
   }
@@ -528,7 +458,50 @@ void loop() {
   if (publishStateFlag) {
 
     //readout new state
-    Serial.println(state);
+    String str = "Change to State ";
+    switch (state)
+    {
+        case STATE_IDLE:
+            str += "IDLE";
+            break;
+        case STATE_LOAD_IN:
+            str += "LOAD_IN";
+            break;
+        case STATE_READY:
+            str += "READY";
+            break;
+        case STATE_COUNTDOWN:
+            str += "COUNTDOWN";
+            break;
+        case STATE_MATCH:
+            str += "MATCH";
+            break;
+        case STATE_1_MIN:
+            str += "1_MIN";
+            break;
+        case STATE_10_SEC:
+            str += "10_SEC";
+            break;
+        case STATE_END:
+            str += "END";
+            break;
+        case STATE_KO_CONFIRM:
+            str += "KO_CONFIRM";
+            break;
+        case STATE_KO:
+            str += "KO";
+            break;
+        case STATE_E_STOP:
+            str += "E_STOP";
+            break;
+        case STATE_PAUSE:
+            str += "PAUSE";
+            break;
+        default:
+            str += "INVALID";
+            break;
+    }
+    Serial.println(str);
 
     //set system state for broadcast
     broadcastSystemState();
@@ -576,12 +549,15 @@ void loop() {
 
     publishStateFlag = false; //set publishStateFlag to false after broadcast
   }
+
+  // Record prev_time
+  prevTime = currentTime;
 }
 
 void broadcastSystemState(){ //check the state machine to send the state signal
 
   outGoing.systemState = state; //set output state to current state
-  outGoing.systemTime = 7; //arbitrary test value
+  outGoing.systemTime = countdown; //arbitrary test value
 
   return;
 }
