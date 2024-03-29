@@ -25,6 +25,8 @@ typedef struct struct_message {
 }struct_message;
 
 volatile int state = 0;
+bool one_minute_remaining_flag;
+bool ten_seconds_remaining_flag;
 
 //Create a struct_message called myData
 struct_message myData;
@@ -72,6 +74,9 @@ void setup() {
   } else {
     Serial.println("Connecting to DFPlayer Mini failed!");
   }
+
+  one_minute_remaining_flag = false;
+  ten_seconds_remaining_flag = false;
 }
  
 void loop() {
@@ -84,6 +89,10 @@ void loop() {
         
         //state actions (system start sound)
         player.play(1);
+
+        // Reset the flags
+        one_minute_remaining_flag = false;
+        ten_seconds_remaining_flag = false;
 
         break;
 
@@ -118,14 +127,20 @@ void loop() {
       case 5: //one minute remaining state
 
         //state actions (Announcer)
-        player.play(15);
+        if (!one_minute_remaining_flag) {
+          player.play(15);
+          one_minute_remaining_flag = true;
+        }
 
         break;
 
       case 6: //ten seconds remaining state
 
         //state actions (Announcer)
-        player.play(16);
+        if (!ten_seconds_remaining_flag) {
+          player.play(16);
+          ten_seconds_remaining_flag = true;
+        }
 
         break;
 
