@@ -13,6 +13,8 @@ import rtc
 import espidf
 import socketpool
 import struct
+import math
+
 from adafruit_display_text.label import Label
 from adafruit_bitmap_font import bitmap_font
 from adafruit_matrixportal.matrix import Matrix
@@ -84,7 +86,33 @@ class TimerDisplayNode:
         CONTROLLER_PEER = espnow.Peer(mac=b'\xa8B\xe3F\xfe\xf8')
         self.espnow_packet.peers.append(CONTROLLER_PEER)
 
+        self.time_sync = 0
+        self.state = 0
+
         ###########################
+
+    def process_packet(self):
+        '''
+        Read the last received ESP-NOW packet and return the match state as an integer
+        Return None if packet is empty or Null
+        '''
+        if (self.espnow_packet):
+            packet_bytes = self.espnow_packet.read()
+            if not packet_bytes is None:
+                
+                state = packet_bytes.msg[0]
+                if not state is None:
+                    self.state = state
+
+                t = 0
+                for i in [7, 6, 5, 4]:
+                    t = t << 8
+                    t += packet_bytes.msg[i]
+                if not t is None:
+                    self.remaining_time = math.ceil(t / 1000.0)
+                    return True
+                return False
+        return False
 
     def read_state(self) -> int:
         '''
@@ -99,6 +127,23 @@ class TimerDisplayNode:
         else:
             return None
         
+    def read_time_sync(self) -> int:
+        '''
+        Read the last received ESP-NOW packet and return the match state as an integer
+        Return None if packet is empty or Null
+        '''
+        if (self.espnow_packet):
+            packet_bytes = self.espnow_packet.read()
+            if (packet_bytes is None):
+                return None
+            return 10
+            for i in [4, 5, 6, 7]:
+                t = t << 8
+                t += packet_bytes.msg[i]
+            return t
+        else:
+            return 999
+        
     def send_time(self) -> None:
         '''
         Broadcast an ESP-NOW packet with an updated remaining time in seconds
@@ -106,27 +151,10 @@ class TimerDisplayNode:
         bytes_int_list = [0, 0, 0, 0, self.remaining_time, 0, 0, 0]
         self.espnow_packet.send(bytes(bytes_int_list))
 
-    def update_time(self, remaining_time):
-        '''take in current remaining_time, update it, display it, and return new remaining_time'''
-        # calculate remaining time in seconds
-        seconds = remaining_time % 60
-        minutes = remaining_time // 60
+    def update_display(self, text, colorIndex):
 
-        if self.BLINK:
-            colon = ":" if (remaining_time % 2) else " "
-        else:
-            colon = ":"
-
-        self.clock_label.text = "{minutes:02d}{colon}{seconds:02d}".format(
-            minutes=minutes, seconds=seconds, colon=colon
-        )
-
-        if remaining_time < 11:
-            self.clock_label.color = self.color[1] # red text for final ten seconds
-        elif remaining_time < 60:
-            self.clock_label.color = self.color[2] # yellow text for less than one minute remaining
-        elif remaining_time > 60:
-            self.clock_label.color = self.color[3] # green text for more than 1 minute remaining
+        self.clock_label.text = text
+        self.clock_label.color = self.color[colorIndex]
 
         bbx, bby, bbwidth, bbh = self.clock_label.bounding_box
         # Center the label
@@ -135,6 +163,36 @@ class TimerDisplayNode:
         if self.DEBUG:
             print("Label bounding box: {},{},{},{}".format(bbx, bby, bbwidth, bbh))
             print("Label x: {} y: {}".format(self.clock_label.x, self.clock_label.y))
+
+    def display_as_time(self, time):
+        seconds = time % 60
+        minutes = time // 60
+
+        if self.BLINK:
+            colon = ":" if (time % 2 == 0) else " "
+        else:
+            colon = ":"
+
+        text = "{minutes:02d}{colon}{seconds:02d}".format(
+            minutes=minutes, seconds=seconds, colon=colon
+        )
+
+        colorIndex = 0
+        if time < 11:
+            colorIndex = 1 # red text for final ten seconds
+        elif time < 60:
+            colorIndex = 2 # yellow text for less than one minute remaining
+        elif time > 60:
+            colorIndex = 3 # green text for more than 1 minute remaining
+
+        self.update_display(text, colorIndex)
+
+
+    def update_time(self, remaining_time):
+        '''take in current remaining_time, update it, display it, and return new remaining_time'''
+        # calculate remaining time in seconds
+
+        self.display_as_time(remaining_time)
 
         # decrement remaining time
         remaining_time -= 1
@@ -164,30 +222,30 @@ class TimerDisplayNode:
 
     def tick_match_fsm(self):
         '''run the timer state machine'''
-        state = self.read_state()
-        if (state == 0):    # idle state
+
+        if (self.state == 0):    # idle state
             self.reset_timer()
-        elif (state == 1):  # load-in state
+        elif (self.state == 1):  # load-in state
             pass
-        elif (state == 2):  # read for battle state
+        elif (self.state == 2):  # read for battle state
             pass
-        elif (state == 3):  # countdown state
+        elif (self.state == 3):  # countdown state
             pass
-        elif (state == 4):  # match state
+        elif (self.state == 4):  # match state
             self.start_timer()
-        elif (state == 5):  # one minute remaining state
+        elif (self.state == 5):  # one minute remaining state
             pass
-        elif (state == 6):  # 10 seconds remaining state
+        elif (self.state == 6):  # 10 seconds remaining state
             pass
-        elif (state == 7):  # match end state
+        elif (self.state == 7):  # match end state
             self.pause_timer()
-        elif (state == 8):  # ko confirm state
+        elif (self.state == 8):  # ko confirm state
             pass
-        elif (state == 9):  # ko + tap out state
+        elif (self.state == 9):  # ko + tap out state
             self.pause_timer()
-        elif (state == 10): # e-stop state
+        elif (self.state == 10): # e-stop state
             self.pause_timer()
-        elif (state == 11): # pause state
+        elif (self.state == 11): # pause state
             self.pause_timer()
         else:               # invalid state / no received packet
             pass
@@ -198,16 +256,22 @@ if __name__ == "__main__":
 
     # main loop
     while True:
+
+        # Check for packets
+        newPacket = node.process_packet()
+        if newPacket:
+            node.display_as_time(node.remaining_time)
+
         # receive the state and run the state machine
         node.tick_match_fsm()
 
-        # each second, tick the timer and broadcast the remaining seconds
+        # # tick the timer each second if the packets fail to arrive
         current_time = time.monotonic_ns() # unix time in int seconds
-        if (current_time > (prev_time + 1e9)):
+        if newPacket:
+            prev_time = current_time
+        elif (current_time > (prev_time + 1e9)):
             prev_time = current_time
 
             # tick the timer
             node.tick_timer_s()
 
-            # broadcast the remaining seconds
-            # node.send_time()
