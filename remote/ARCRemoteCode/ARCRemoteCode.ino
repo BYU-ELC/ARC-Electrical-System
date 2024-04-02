@@ -50,7 +50,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define reset 19
 
 #define SYNC_INTERVAL 500
-#define COUNTDOWN_INT 995
+#define COUNTDOWN_INT 990
 
 //debounce setup
 Button nextButton(next);
@@ -61,7 +61,7 @@ Button resetButton(reset);
 
 //initialize state counter, timer, and match length
 volatile int state = STATE_IDLE;
-int matchLength = 18; //in seconds
+int matchLength = 180; //in seconds
 bool publishStateFlag = false; // indicates a request to broadcast the system state
 
 // Timing
@@ -281,7 +281,6 @@ void displayCountdown() {
     display.setCursor(30, 10);
     display.println(second);
   }
-  display.println(countdown);
   display.display();
 
 }
