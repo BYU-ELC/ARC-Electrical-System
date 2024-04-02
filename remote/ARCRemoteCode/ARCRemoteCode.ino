@@ -49,6 +49,9 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define estop 18
 #define reset 19
 
+#define SYNC_INTERVAL 500
+#define COUNTDOWN_INT 1000
+
 //debounce setup
 Button nextButton(next);
 Button pauseButton(pause);
@@ -78,7 +81,7 @@ uint8_t broadcastAddress3[] = {0xA8, 0x42, 0xE3, 0x47, 0x95, 0x30}; //light node
 // Must match the receiver structure
 typedef struct struct_message {
   int systemState; //broadcast the system state
-  long systemTime; //timer for the system
+  int systemTime; //timer for the system
 } struct_message;
 
 // Create struct_messages for incoming and outgoing data
@@ -261,7 +264,7 @@ void resetFunction() { //reset button
 
 void displayCountdown() {
   int minute = countdown / 60000;
-  int second = (countdown / 1000) % 60;
+  int second = 1 + ((countdown % 60000) / 1000);
 
   display.clearDisplay();
   display.setCursor(10, 10);
@@ -278,6 +281,17 @@ void displayCountdown() {
     display.println(second);
   }
   display.display();
+}
+
+void dec_and_send_countdown(long currentTime, long prevTime)
+{
+  static long last_broadcast = currentTime;
+  countdown -= currentTime - prevTime;
+  if (currentTime - last_broadcast > SYNC_INTERVAL)
+  {
+    publishStateFlag = true;
+    last_broadcast = currentTime;
+  }
 }
  
 void loop() {
@@ -323,17 +337,17 @@ void loop() {
     case STATE_COUNTDOWN: //countdown state: 1hz white pulse, 3-2-1 countdown text on timer
       //state actions (3 second countdown on display)
       
-      if (timeSinceStateChange < 1000) {
+      if (timeSinceStateChange < COUNTDOWN_INT) {
         display.clearDisplay();
         display.setCursor(10, 10);
         display.println("3...");
         display.display();
-      } else if (timeSinceStateChange < 2000) {
+      } else if (timeSinceStateChange < COUNTDOWN_INT * 2) {
         display.clearDisplay();
         display.setCursor(10, 10);
         display.println("2...");
         display.display();
-      } else if (timeSinceStateChange < 3000) {
+      } else if (timeSinceStateChange < COUNTDOWN_INT * 3) {
         display.clearDisplay();
         display.setCursor(10, 10);
         display.println("1...");
@@ -347,7 +361,7 @@ void loop() {
     case STATE_MATCH: //match state: steady white for t>1min, steady yellow for 1min>t>10sec, 1hz red pulse for t<10sec
       //timer counting from 3 minutes
       //state actions (maintain a 3 minute timer on the controller)
-      countdown -= currentTime - prevTime;
+      dec_and_send_countdown(currentTime, prevTime);
       displayCountdown();
       
       if (countdown <= 60000) {
@@ -358,7 +372,7 @@ void loop() {
 
     case STATE_1_MIN: //one minute left state
       //state actions (maintain a 3 minute timer on the controller)
-      countdown -= currentTime - prevTime;
+      dec_and_send_countdown(currentTime, prevTime);
       displayCountdown();
       
       if (countdown <= 10000) {
@@ -368,10 +382,11 @@ void loop() {
     
     case STATE_10_SEC: //ten seconds left state
       //state actions (maintain a 3 minute timer on the controller)
-      countdown -= currentTime - prevTime;
+      dec_and_send_countdown(currentTime, prevTime);
       displayCountdown();
       
       if (countdown <= 0) {
+        countdown = 0;
         UpdateState(STATE_END);
       }
       break;
@@ -557,7 +572,7 @@ void loop() {
 void broadcastSystemState(){ //check the state machine to send the state signal
 
   outGoing.systemState = state; //set output state to current state
-  outGoing.systemTime = countdown; //arbitrary test value
+  outGoing.systemTime = countdown;
 
   return;
 }
