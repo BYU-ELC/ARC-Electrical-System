@@ -50,7 +50,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define reset 19
 
 #define SYNC_INTERVAL 500
-#define COUNTDOWN_INT 1000
+#define COUNTDOWN_INT 995
 
 //debounce setup
 Button nextButton(next);
@@ -61,7 +61,7 @@ Button resetButton(reset);
 
 //initialize state counter, timer, and match length
 volatile int state = STATE_IDLE;
-int matchLength = 180; //in seconds
+int matchLength = 18; //in seconds
 bool publishStateFlag = false; // indicates a request to broadcast the system state
 
 // Timing
@@ -263,8 +263,9 @@ void resetFunction() { //reset button
 }
 
 void displayCountdown() {
-  int minute = countdown / 60000;
-  int second = 1 + ((countdown % 60000) / 1000);
+  int rounded_up_total_seconds = (countdown / 1000) + !!(countdown % 1000); // Round up to nearest second
+  int minute = rounded_up_total_seconds / 60;
+  int second = rounded_up_total_seconds % 60;
 
   display.clearDisplay();
   display.setCursor(10, 10);
@@ -280,17 +281,18 @@ void displayCountdown() {
     display.setCursor(30, 10);
     display.println(second);
   }
+  display.println(countdown);
   display.display();
+
 }
 
 void dec_and_send_countdown(long currentTime, long prevTime)
 {
-  static long last_broadcast = currentTime;
+  long prevCountdown = countdown;
   countdown -= currentTime - prevTime;
-  if (currentTime - last_broadcast > SYNC_INTERVAL)
+  if ((prevCountdown / 1000) - (countdown / 1000) != 0) // Crossed second boundary
   {
     publishStateFlag = true;
-    last_broadcast = currentTime;
   }
 }
  

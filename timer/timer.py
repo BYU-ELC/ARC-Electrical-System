@@ -109,7 +109,7 @@ class TimerDisplayNode:
                     t = t << 8
                     t += packet_bytes.msg[i]
                 if not t is None:
-                    self.remaining_time = math.ceil(t / 1000.0)
+                    self.remaining_time = (t + 500) // 1000
                     return True
                 return False
         return False
@@ -126,23 +126,6 @@ class TimerDisplayNode:
             return packet_bytes.msg[0]
         else:
             return None
-        
-    def read_time_sync(self) -> int:
-        '''
-        Read the last received ESP-NOW packet and return the match state as an integer
-        Return None if packet is empty or Null
-        '''
-        if (self.espnow_packet):
-            packet_bytes = self.espnow_packet.read()
-            if (packet_bytes is None):
-                return None
-            return 10
-            for i in [4, 5, 6, 7]:
-                t = t << 8
-                t += packet_bytes.msg[i]
-            return t
-        else:
-            return 999
         
     def send_time(self) -> None:
         '''
@@ -178,11 +161,11 @@ class TimerDisplayNode:
         )
 
         colorIndex = 0
-        if time < 11:
+        if time <= 10:
             colorIndex = 1 # red text for final ten seconds
-        elif time < 60:
+        elif time <= 60:
             colorIndex = 2 # yellow text for less than one minute remaining
-        elif time > 60:
+        else:
             colorIndex = 3 # green text for more than 1 minute remaining
 
         self.update_display(text, colorIndex)
