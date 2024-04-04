@@ -150,6 +150,10 @@ void loop() {
         blinkAll(255, 625);
       }
     }
+
+    // Automatically progress to match
+    // Catches bug where the remote broadcast is a little slow
+    state = 4;
     
     break;
 
