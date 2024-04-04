@@ -15,7 +15,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <Button.h>
+#include <ButtonDebounce.h>
 
 // Improve State Readability
 #define STATE_IDLE          0
@@ -49,15 +49,16 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define estop 18
 #define reset 19
 
-#define SYNC_INTERVAL 500
-#define COUNTDOWN_INT 990
+#define SYNC_INTERVAL       500
+#define COUNTDOWN_INT       990
+#define BUTTON_DEBOUNCE_MS  100
 
 //debounce setup
-Button nextButton(next);
-Button pauseButton(pause);
-Button koButton(ko);
-Button estopButton(estop);
-Button resetButton(reset);
+ButtonDebounce nextButton(next, BUTTON_DEBOUNCE_MS);
+ButtonDebounce pauseButton(pause, BUTTON_DEBOUNCE_MS);
+ButtonDebounce koButton(ko, BUTTON_DEBOUNCE_MS);
+ButtonDebounce estopButton(estop, BUTTON_DEBOUNCE_MS);
+ButtonDebounce resetButton(reset, BUTTON_DEBOUNCE_MS);
 
 //initialize state counter, timer, and match length
 volatile int state = STATE_IDLE;
@@ -119,17 +120,114 @@ void UpdateState(uint8_t newState){
 
 //peer info
 esp_now_peer_info_t peerInfo;
+
+void nextFunction(int buttonState) { //next button
+  if (!buttonState) return;
+  switch (state) { //state changes from "next" button
+
+    case STATE_IDLE: //change from idle to load-in
+      UpdateState(STATE_LOAD_IN);
+      break;
+    
+    case STATE_LOAD_IN: //change from load-in to ready for battle
+      UpdateState(STATE_READY);
+      break;
+
+    case STATE_READY: //change from ready for battle to start countdown
+      UpdateState(STATE_COUNTDOWN);
+      break;
+
+    case STATE_KO_CONFIRM: //change from ko confirm to match timer
+      UpdateState(STATE_MATCH);
+      break;
+  }
+}
+
+void pauseFunction(int buttonState) { //pause button
+  if (!buttonState) return;
+  if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to pause
+    UpdateState(STATE_PAUSE);
+  } else if (state == STATE_PAUSE) { //change from pause to match timer
+    UpdateState(STATE_COUNTDOWN);
+  }
+  return;
+}
+
+void koFunction(int buttonState) { //ko button
+  if (!buttonState) return;
+  if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to ko confirm
+    UpdateState(STATE_KO_CONFIRM);
+  } else if (state == STATE_KO_CONFIRM) { //change from ko confirm to knock out
+    Serial.println("ko confirm trigger");
+    UpdateState(STATE_KO);
+  }
+  return;
+}
+
+void estopFunction(int buttonState) { //estop button
+  if (!buttonState) return;
+  if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC || state == STATE_10_SEC) { //change from match timer to estop
+    UpdateState(STATE_E_STOP);
+  } else if (state == STATE_E_STOP) { //change from estop to match timer
+    UpdateState(STATE_COUNTDOWN);
+  }
+  return;
+}
+
+void resetFunction(int buttonState) { //reset button
+  if (!buttonState) return;
+  if (state == STATE_END) { //change from match end to idle
+    UpdateState(STATE_IDLE);
+  } else if (state == STATE_KO) { //change from knock out to idle
+    UpdateState(STATE_IDLE);
+  } else if (state == STATE_E_STOP) { //change from knock out to idle
+    UpdateState(STATE_IDLE);
+  }
+}
+
+void displayCountdown() {
+  int rounded_up_total_seconds = (countdown / 1000) + !!(countdown % 1000); // Round up to nearest second
+  int minute = rounded_up_total_seconds / 60;
+  int second = rounded_up_total_seconds % 60;
+
+  display.clearDisplay();
+  display.setCursor(10, 10);
+  display.println(minute);
+  display.setCursor(20, 10);
+  display.println(":");
+  if (second < 10) {
+    display.setCursor(30, 10);
+    display.println(0);
+    display.setCursor(42, 10);
+    display.println(second);
+  } else {
+    display.setCursor(30, 10);
+    display.println(second);
+  }
+  display.display();
+
+}
+
+void dec_and_send_countdown(long currentTime, long prevTime)
+{
+  long prevCountdown = countdown;
+  countdown -= currentTime - prevTime;
+  if ((prevCountdown / 1000) - (countdown / 1000) != 0) // Crossed second boundary
+  {
+    publishStateFlag = true;
+  }
+}
  
 void setup() {
   // Init Serial Monitor
   Serial.begin(115200);
 
   //---------------Button Setup----------------
-  nextButton.begin();
-  pauseButton.begin();
-  koButton.begin();
-  estopButton.begin();
-  resetButton.begin();
+  nextButton.setCallback(&nextFunction);
+  pauseButton.setCallback(&pauseFunction);
+  koButton.setCallback(&koFunction);
+  estopButton.setCallback(&estopFunction);
+  resetButton.setCallback(&resetFunction);
 
   //---------------ESP-NOW Setup----------------
 
@@ -201,108 +299,15 @@ void setup() {
   // Init Match time
   countdown = matchLength * 1000;
 }
-
-void nextFunction() { //next button
-  switch (state) { //state changes from "next" button
-
-    case STATE_IDLE: //change from idle to load-in
-      UpdateState(STATE_LOAD_IN);
-      break;
-    
-    case STATE_LOAD_IN: //change from load-in to ready for battle
-      UpdateState(STATE_READY);
-      break;
-
-    case STATE_READY: //change from ready for battle to start countdown
-      UpdateState(STATE_COUNTDOWN);
-      break;
-
-    case STATE_KO_CONFIRM: //change from ko confirm to match timer
-      UpdateState(STATE_MATCH);
-      break;
-  }
-}
-
-void pauseFunction() { //pause button
-  if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to pause
-    UpdateState(STATE_PAUSE);
-  } else if (state == STATE_PAUSE) { //change from pause to match timer
-    UpdateState(STATE_COUNTDOWN);
-  }
-  return;
-}
-
-void koFunction() { //ko button
-  Serial.println("KO Pressed, in State " + state); 
-  if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC) { //change from match timer to ko confirm
-    UpdateState(STATE_KO_CONFIRM);
-  } else if (state == STATE_KO_CONFIRM) { //change from ko confirm to knock out
-    Serial.println("ko confirm trigger");
-    UpdateState(STATE_KO);
-  }
-  return;
-}
-
-void estopFunction() { //estop button
-  if (state == STATE_MATCH || state == STATE_1_MIN || state == STATE_10_SEC || state == STATE_10_SEC) { //change from match timer to estop
-    UpdateState(STATE_E_STOP);
-  } else if (state == STATE_E_STOP) { //change from estop to match timer
-    UpdateState(STATE_COUNTDOWN);
-  }
-  return;
-}
-
-void resetFunction() { //reset button
-  if (state == STATE_END) { //change from match end to idle
-    UpdateState(STATE_IDLE);
-  } else if (state == STATE_KO) { //change from knock out to idle
-    UpdateState(STATE_IDLE);
-  } else if (state == STATE_E_STOP) { //change from knock out to idle
-    UpdateState(STATE_IDLE);
-  }
-}
-
-void displayCountdown() {
-  int rounded_up_total_seconds = (countdown / 1000) + !!(countdown % 1000); // Round up to nearest second
-  int minute = rounded_up_total_seconds / 60;
-  int second = rounded_up_total_seconds % 60;
-
-  display.clearDisplay();
-  display.setCursor(10, 10);
-  display.println(minute);
-  display.setCursor(20, 10);
-  display.println(":");
-  if (second < 10) {
-    display.setCursor(30, 10);
-    display.println(0);
-    display.setCursor(42, 10);
-    display.println(second);
-  } else {
-    display.setCursor(30, 10);
-    display.println(second);
-  }
-  display.display();
-
-}
-
-void dec_and_send_countdown(long currentTime, long prevTime)
-{
-  long prevCountdown = countdown;
-  countdown -= currentTime - prevTime;
-  if ((prevCountdown / 1000) - (countdown / 1000) != 0) // Crossed second boundary
-  {
-    publishStateFlag = true;
-  }
-}
  
 void loop() {
 
   // Button Routines (use released() for faster response)
-  if (nextButton.released()) nextFunction();
-  if (pauseButton.released()) pauseFunction();
-  if (koButton.released()) koFunction();
-  if (estopButton.released()) estopFunction();
-  if (resetButton.released()) resetFunction();
+  nextButton.update();
+  pauseButton.update();
+  koButton.update();
+  estopButton.update();
+  resetButton.update();
 
   // Update current_time
   currentTime = millis();
@@ -402,7 +407,7 @@ void loop() {
 
     case STATE_KO_CONFIRM: //ko confirm state
       //ko question displayed
-      countdown -= currentTime - prevTime;
+      dec_and_send_countdown(currentTime, prevTime);
       
       if (timeSinceStateChange % 1000 < 500) {
         display.clearDisplay();
